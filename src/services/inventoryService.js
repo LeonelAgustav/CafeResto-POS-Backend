@@ -1,0 +1,186 @@
+const menuRepository = require('../repositories/menuRepository');
+const supabase = require('../config/supabase');
+
+class InventoryService {
+
+    /**
+     * Menghitung total bahan baku yang dibutuhkan untuk sebuah order.
+     * @param {Array} orderItems - Contoh: [{ menuId: 1, qty: 2 }]
+     */
+    async calculateRequirements(orderItems) {
+        // 1. Ambil semua ID menu dari order
+        const menuIds = orderItems.map(item => item.menuId);
+
+        // 2. Tarik semua resep yang relevan dari Database
+        const recipes = await menuRepository.getRecipesByMenuIds(menuIds);
+
+        // 3. MULAI MATEMATIKA (Agregasi Bahan)
+        // Kita butuh map untuk menjumlahkan bahan yang sama dari menu berbeda
+        // Contoh: Menu A butuh Susu, Menu B butuh Susu -> Susu harus dijumlahkan
+        const ingredientNeeds = {}; // Format: { ingredientId: { totalNeeded, stock, name } }
+
+        orderItems.forEach(item => {
+            // Cari resep untuk menu ini
+            const itemRecipes = recipes.filter(r => r.menu_item_id == item.menuId);
+
+            itemRecipes.forEach(recipe => {
+                const ingId = recipe.ingredient.id;
+                const qtyPerUnit = recipe.quantity_required;
+                const totalForThisItem = qtyPerUnit * item.qty; // Resep x Jumlah Pesanan
+
+                if (!ingredientNeeds[ingId]) {
+                    // Inisialisasi jika belum ada di list
+                    ingredientNeeds[ingId] = {
+                        id: ingId,
+                        name: recipe.ingredient.name,
+                        currentStock: recipe.ingredient.current_stock,
+                        totalNeeded: 0,
+                        unit: recipe.ingredient.unit
+                    };
+                }
+
+                // Akumulasi kebutuhan
+                ingredientNeeds[ingId].totalNeeded += totalForThisItem;
+            });
+        });
+
+        return Object.values(ingredientNeeds);
+    }
+
+    /**
+     * Mengecek apakah stok cukup. Melempar Error jika kurang.
+     */
+    async checkStockAvailability(orderItems) {
+        // 1. Hitung kebutuhan
+        const requirements = await this.calculateRequirements(orderItems);
+
+        // 2. Cari bahan yang minus (Kurang)
+        const missingIngredients = requirements.filter(req => req.totalNeeded > req.currentStock);
+
+        // 3. Jika ada yang kurang, STOP PROSES!
+        if (missingIngredients.length > 0) {
+            const errorDetails = missingIngredients.map(item =>
+                `${item.name} (Butuh: ${item.totalNeeded} ${item.unit}, Sisa: ${item.currentStock} ${item.unit})`
+            ).join(', ');
+
+            throw new Error(`STOK TIDAK CUKUP: ${errorDetails}`);
+        }
+
+        return {
+            status: 'OK',
+            requirements: requirements // Return ini untuk diproses pengurangan nantinya
+        };
+    }
+
+    async deductStock(requirements, orderIdString) {
+        // Kita loop setiap bahan yang perlu dikurangi
+        for (const req of requirements) {
+            const newStock = req.currentStock - req.totalNeeded;
+
+            // 1. Update Tabel Ingredients
+            const { error: updateError } = await supabase
+                .from('ingredients')
+                .update({ current_stock: newStock })
+                .eq('id', req.id);
+
+            if (updateError) throw new Error(`Gagal potong stok ${req.name}`);
+
+            // 2. Catat di Inventory Logs (Audit Trail)
+            await supabase
+                .from('inventory_logs')
+                .insert({
+                    ingredient_id: req.id,
+                    quantity_change: -req.totalNeeded, // Negatif karena keluar
+                    reason: `Order ${orderIdString}`
+                });
+        }
+        return true;
+    }
+
+    /**
+     * Mengembalikan stok (Reversal) karena pembatalan/kegagalan order.
+     */
+    async restoreStock(orderId, items) {
+        // 1. Hitung ulang kebutuhan bahan (sama seperti saat deduct)
+        const requirements = await this.calculateRequirements(items);
+
+        for (const req of requirements) {
+        // 2. Tambah stok kembali
+        // (Kita tidak punya 'current_stock' terbaru di var 'req', 
+        // tapi kita bisa langsung pakai increment sql query atau fetch dulu. 
+        // Supabase tidak punya atomic increment yg mudah via JS client tanpa RPC, 
+        // jadi kita fetch-update manual (optimistic locking level basic))
+        
+        // Ambil stok terbaru dulu
+        const { data: currentIng } = await supabase
+            .from('ingredients')
+            .select('current_stock')
+            .eq('id', req.id)
+            .single();
+            
+        if (!currentIng) continue; // Skip jika bahan dihapus (edge case)
+
+        const restoredStock = currentIng.current_stock + req.totalNeeded;
+
+        // Update DB
+        await supabase
+            .from('ingredients')
+            .update({ current_stock: restoredStock })
+            .eq('id', req.id);
+
+        // Catat Log Pengembalian
+        await supabase
+            .from('inventory_logs')
+            .insert({
+            ingredient_id: req.id,
+            quantity_change: req.totalNeeded, // Positif (Masuk lagi)
+            reason: `Reversal Order ${orderId}` // Reason penting!
+            });
+        }
+        return true;
+    }
+
+    /**
+     * Menambah/Mengurangi stok secara manual (Restock atau Waste)
+     * @param {number} ingredientId 
+     * @param {number} qtyChange - Positif untuk masuk, Negatif untuk keluar/waste
+     * @param {string} reason - e.g., "Belanja Pasar", "Barang Kadaluarsa"
+     */
+    async adjustStock(ingredientId, qtyChange, reason) {
+        // 1. Ambil data stok sekarang
+        const { data: currentIng, error } = await supabase
+        .from('ingredients')
+        .select('current_stock, name')
+        .eq('id', ingredientId)
+        .single();
+
+        if (error || !currentIng) throw new Error(`Bahan baku ID ${ingredientId} tidak ditemukan.`);
+
+        const newStock = parseFloat(currentIng.current_stock) + parseFloat(qtyChange);
+
+        // 2. Update Database
+        const { error: updateError } = await supabase
+        .from('ingredients')
+        .update({ current_stock: newStock })
+        .eq('id', ingredientId);
+
+        if (updateError) throw new Error("Gagal update stok database.");
+
+        // 3. Catat Log (PENTING!)
+        await supabase
+        .from('inventory_logs')
+        .insert({
+            ingredient_id: ingredientId,
+            quantity_change: qtyChange,
+            reason: reason
+        });
+
+        return { 
+        ingredient: currentIng.name, 
+        oldStock: currentIng.current_stock, 
+        newStock: newStock 
+        };
+    }
+}
+
+module.exports = new InventoryService();
