@@ -59,6 +59,56 @@ class InventoryService {
     }
 
     /**
+     * Mengecek apakah stok cukup. Melempar Error jika kurang.
+     */
+    async checkStockAvailability(orderItems) {
+        // 1. Hitung kebutuhan
+        const requirements = await this.calculateRequirements(orderItems);
+
+        // 2. Cari bahan yang minus (Kurang)
+        const missingIngredients = requirements.filter(req => req.totalNeeded > req.currentStock);
+
+        // 3. Jika ada yang kurang, STOP PROSES!
+        if (missingIngredients.length > 0) {
+            const errorDetails = missingIngredients.map(item =>
+                `${item.name} (Butuh: ${item.totalNeeded} ${item.unit}, Sisa: ${item.currentStock} ${item.unit})`
+            ).join(', ');
+
+            throw new Error(`STOK TIDAK CUKUP: ${errorDetails}`);
+        }
+
+        return {
+            status: 'OK',
+            requirements: requirements // Return ini untuk diproses pengurangan nantinya
+        };
+    }
+
+    async deductStock(requirements, orderIdString) {
+        // Kita loop setiap bahan yang perlu dikurangi
+        for (const req of requirements) {
+            const newStock = req.currentStock - req.totalNeeded;
+
+            // 1. Update Tabel Ingredients
+            const { error: updateError } = await supabase
+                .from('ingredients')
+                .update({ current_stock: newStock })
+                .eq('id', req.id);
+
+            if (updateError) throw new Error(`Gagal potong stok ${req.name}`);
+
+            // 2. Catat di Inventory Logs (Audit Trail)
+            await supabase
+                .from('inventory_logs')
+                .insert({
+                    ingredient_id: req.id,
+                    quantity_change: -req.totalNeeded, // Negatif karena keluar
+                    reason: `Order ${orderIdString}`
+                });
+        }
+        return true;
+    }
+
+    /**
      * Mengembalikan stok (Reversal) karena pembatalan/kegagalan order.
      */
     async restoreStock(orderId, items) {
@@ -102,46 +152,46 @@ class InventoryService {
     }
 
     /**
-     * Menambah/Mengurangi stok secara manual (Restock atau Waste)
-     * @param {number} ingredientId 
-     * @param {number} qtyChange - Positif untuk masuk, Negatif untuk keluar/waste
-     * @param {string} reason - e.g., "Belanja Pasar", "Barang Kadaluarsa"
-     */
-    async adjustStock(ingredientId, qtyChange, reason) {
-        // 1. Ambil data stok sekarang
-        const { data: currentIng, error } = await supabase
-        .from('ingredients')
-        .select('current_stock, name')
-        .eq('id', ingredientId)
-        .single();
+   * Menambah/Mengurangi stok secara manual (Restock atau Waste)
+   * @param {number} ingredientId 
+   * @param {number} qtyChange - Positif untuk masuk, Negatif untuk keluar/waste
+   * @param {string} reason - e.g., "Belanja Pasar", "Barang Kadaluarsa"
+   */
+  async adjustStock(ingredientId, qtyChange, reason) {
+    // 1. Ambil data stok sekarang
+    const { data: currentIng, error } = await supabase
+      .from('ingredients')
+      .select('current_stock, name')
+      .eq('id', ingredientId)
+      .single();
 
-        if (error || !currentIng) throw new Error(`Bahan baku ID ${ingredientId} tidak ditemukan.`);
+    if (error || !currentIng) throw new Error(`Bahan baku ID ${ingredientId} tidak ditemukan.`);
 
-        const newStock = parseFloat(currentIng.current_stock) + parseFloat(qtyChange);
+    const newStock = parseFloat(currentIng.current_stock) + parseFloat(qtyChange);
 
-        // 2. Update Database
-        const { error: updateError } = await supabase
-        .from('ingredients')
-        .update({ current_stock: newStock })
-        .eq('id', ingredientId);
+    // 2. Update Database
+    const { error: updateError } = await supabase
+      .from('ingredients')
+      .update({ current_stock: newStock })
+      .eq('id', ingredientId);
 
-        if (updateError) throw new Error("Gagal update stok database.");
+    if (updateError) throw new Error("Gagal update stok database.");
 
-        // 3. Catat Log (PENTING!)
-        await supabase
-        .from('inventory_logs')
-        .insert({
-            ingredient_id: ingredientId,
-            quantity_change: qtyChange,
-            reason: reason
-        });
+    // 3. Catat Log (PENTING!)
+    await supabase
+      .from('inventory_logs')
+      .insert({
+        ingredient_id: ingredientId,
+        quantity_change: qtyChange,
+        reason: reason
+      });
 
-        return { 
-        ingredient: currentIng.name, 
-        oldStock: currentIng.current_stock, 
-        newStock: newStock 
-        };
-    }
+    return { 
+      ingredient: currentIng.name, 
+      oldStock: currentIng.current_stock, 
+      newStock: newStock 
+    };
+  }
 }
 
 module.exports = new InventoryService();
