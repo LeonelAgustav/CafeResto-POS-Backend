@@ -8,93 +8,54 @@ class InventoryService {
      * @param {Array} orderItems - Contoh: [{ menuId: 1, qty: 2 }]
      */
     async calculateRequirements(orderItems) {
-        // 1. Ambil semua ID menu dari order
         const menuIds = orderItems.map(item => item.menuId);
-
-        // 2. Tarik semua resep yang relevan dari Database
+        
+        // 1. Ambil Resep
         const recipes = await menuRepository.getRecipesByMenuIds(menuIds);
+        
+        // DEBUG LOG: Lihat apa yang dikasih Supabase
+        console.log(`[DEBUG] Recipes Found: ${recipes?.length || 0}`);
 
-        // 3. MULAI MATEMATIKA (Agregasi Bahan)
-        // Kita butuh map untuk menjumlahkan bahan yang sama dari menu berbeda
-        // Contoh: Menu A butuh Susu, Menu B butuh Susu -> Susu harus dijumlahkan
-        const ingredientNeeds = {}; // Format: { ingredientId: { totalNeeded, stock, name } }
+        const ingredientNeeds = {};
 
         orderItems.forEach(item => {
-            // Cari resep untuk menu ini
-            const itemRecipes = recipes.filter(r => r.menu_item_id == item.menuId);
+        const itemRecipes = recipes.filter(r => r.menu_item_id == item.menuId);
 
-            itemRecipes.forEach(recipe => {
-                const ingId = recipe.ingredient.id;
-                const qtyPerUnit = recipe.quantity_required;
-                const totalForThisItem = qtyPerUnit * item.qty; // Resep x Jumlah Pesanan
+        itemRecipes.forEach(recipe => {
+            
+            // --- PENANGKAL ERROR (FIX) ---
+            // Jika ingredient null, berarti RLS memblokir atau data korup
+            if (!recipe.ingredient) {
+                console.error("⚠️ DATA ERROR DETECTED:");
+                console.error("- Menu ID:", item.menuId);
+                console.error("- Recipe Data:", JSON.stringify(recipe));
+                console.error("- Penyebab: Kemungkinan besar Config Supabase masih pakai Key Anon/Public, bukan Service Key.");
+                
+                // Kita skip saja biar server tidak mati, tapi log error
+                return; 
+            }
+            // -----------------------------
 
-                if (!ingredientNeeds[ingId]) {
-                    // Inisialisasi jika belum ada di list
-                    ingredientNeeds[ingId] = {
-                        id: ingId,
-                        name: recipe.ingredient.name,
-                        currentStock: recipe.ingredient.current_stock,
-                        totalNeeded: 0,
-                        unit: recipe.ingredient.unit
-                    };
-                }
+            // Baris 27 yang tadi error, sekarang aman karena sudah dicek di atas
+            const ingId = recipe.ingredient.id; 
+            
+            const qtyPerUnit = recipe.quantity_required;
+            const totalForThisItem = qtyPerUnit * item.qty;
 
-                // Akumulasi kebutuhan
-                ingredientNeeds[ingId].totalNeeded += totalForThisItem;
-            });
+            if (!ingredientNeeds[ingId]) {
+            ingredientNeeds[ingId] = {
+                id: ingId,
+                name: recipe.ingredient.name,
+                currentStock: recipe.ingredient.current_stock,
+                totalNeeded: 0,
+                unit: recipe.ingredient.unit
+            };
+            }
+            ingredientNeeds[ingId].totalNeeded += totalForThisItem;
+        });
         });
 
         return Object.values(ingredientNeeds);
-    }
-
-    /**
-     * Mengecek apakah stok cukup. Melempar Error jika kurang.
-     */
-    async checkStockAvailability(orderItems) {
-        // 1. Hitung kebutuhan
-        const requirements = await this.calculateRequirements(orderItems);
-
-        // 2. Cari bahan yang minus (Kurang)
-        const missingIngredients = requirements.filter(req => req.totalNeeded > req.currentStock);
-
-        // 3. Jika ada yang kurang, STOP PROSES!
-        if (missingIngredients.length > 0) {
-            const errorDetails = missingIngredients.map(item =>
-                `${item.name} (Butuh: ${item.totalNeeded} ${item.unit}, Sisa: ${item.currentStock} ${item.unit})`
-            ).join(', ');
-
-            throw new Error(`STOK TIDAK CUKUP: ${errorDetails}`);
-        }
-
-        return {
-            status: 'OK',
-            requirements: requirements // Return ini untuk diproses pengurangan nantinya
-        };
-    }
-
-    async deductStock(requirements, orderIdString) {
-        // Kita loop setiap bahan yang perlu dikurangi
-        for (const req of requirements) {
-            const newStock = req.currentStock - req.totalNeeded;
-
-            // 1. Update Tabel Ingredients
-            const { error: updateError } = await supabase
-                .from('ingredients')
-                .update({ current_stock: newStock })
-                .eq('id', req.id);
-
-            if (updateError) throw new Error(`Gagal potong stok ${req.name}`);
-
-            // 2. Catat di Inventory Logs (Audit Trail)
-            await supabase
-                .from('inventory_logs')
-                .insert({
-                    ingredient_id: req.id,
-                    quantity_change: -req.totalNeeded, // Negatif karena keluar
-                    reason: `Order ${orderIdString}`
-                });
-        }
-        return true;
     }
 
     /**
