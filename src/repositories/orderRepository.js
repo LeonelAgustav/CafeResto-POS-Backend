@@ -7,9 +7,9 @@ class OrderRepository {
         const { data, error } = await supabase
             .from('orders')
             .insert({
-                // user_id: userId, // Nanti diaktifkan saat ada Auth
+                user_id: userId,
                 total_amount: totalAmount,
-                status: 'pending', // Default pending, nunggu payment gateway
+                status: 'pending',
                 payment_method: paymentMethod
             })
             .select()
