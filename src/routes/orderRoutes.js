@@ -12,7 +12,7 @@ const requireAuth = require('../middlewares/authMiddleware');
 
 /**
  * @swagger
- * api/v1/orders/checkout:
+ * /orders/checkout:
  * post:
  * summary: Buat Pesanan Baru (Checkout)
  * description: Memotong stok bahan, membuat record order, dan mengembalikan detail transaksi.
@@ -58,7 +58,7 @@ router.post('/checkout', requireAuth, orderController.createOrder);
 
 /**
  * @swagger
- * api/v1/orders/{orderId}/cancel:
+ * /orders/{orderId}/cancel:
 * post:
  * summary: Batalkan Pesanan
  * description: Membatalkan status order dan mengembalikan stok bahan.

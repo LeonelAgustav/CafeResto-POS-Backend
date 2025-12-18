@@ -19,11 +19,11 @@ const options = {
     },
     servers: [
       {
-        url: "https://caferesto-pos-backend-production.up.railway.app",
+        url: "https://caferesto-pos-backend-production.up.railway.app/api/v1",
       },
     ],
   },
-  apis: ["./src/routes/*.js"],
+  apis: ["./routes/*.js"],
 };
 
 module.exports = swaggerJsdoc(options);

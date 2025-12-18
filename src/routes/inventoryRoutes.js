@@ -12,7 +12,7 @@ const requireAuth = require('../middlewares/authMiddleware');
 
 /**
  * @swagger
- * api/v1/inventory/restock:
+ * /inventory/adjust:
  * post:
  * summary: Tambah Stok Bahan Baku (Restock)
  * tags: [Inventory]

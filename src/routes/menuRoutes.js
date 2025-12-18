@@ -12,7 +12,7 @@ const requireAuth = require('../middlewares/authMiddleware');
 
 /**
  * @swagger
- * api/v1/menus:
+ * /menus:
  * post:
  * summary: Buat Menu Baru
  * tags: [Menus]
