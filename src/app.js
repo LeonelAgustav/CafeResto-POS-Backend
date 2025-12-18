@@ -21,7 +21,6 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/orders", orderRoutes);
 app.use("/api/v1/inventory", inventoryRoutes);
 app.use("/api/v1/menus", menuRoutes);
-app.use("/api/v1/payments", paymentRoutes);
 
 // ============================
 // SWAGGER DOCS
