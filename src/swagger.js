@@ -40,7 +40,7 @@ const options = {
   },
 
   // ⬇️ SESUAIKAN DENGAN STRUKTUR FOLDER KAMU
-  apis: ["./routes/*.js"],
+  apis: ["./src/swagger/apiDocs.swagger.js"],
 };
 
 module.exports = swaggerJsdoc(options);
