@@ -2,12 +2,12 @@ const swaggerJsdoc = require("swagger-jsdoc");
 
 const options = {
   components: {
-  securitySchemes: {
-    bearerAuth: {
-      type: 'http',
-      scheme: 'bearer',
-      bearerFormat: 'JWT',
-    },
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
   },
 },
   definition: {
@@ -23,7 +23,7 @@ const options = {
       },
     ],
   },
-  apis: ["./routes/*.js"],
+  apis: ["./src/routes/*.js"],
 };
 
 module.exports = swaggerJsdoc(options);
