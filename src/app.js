@@ -7,6 +7,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const authRoutes = require('./routes/authRoutes');
 const inventoryRoutes = require('./routes/inventoryRoutes');
 const menuRoutes = require('./routes/menuRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -21,6 +22,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/orders", orderRoutes);
 app.use("/api/v1/inventory", inventoryRoutes);
 app.use("/api/v1/menus", menuRoutes);
+app.use("/api/v1/payments", paymentRoutes);
 
 // ============================
 // SWAGGER DOCS
