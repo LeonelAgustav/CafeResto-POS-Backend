@@ -4,6 +4,6 @@ const inventoryController = require('../controllers/inventoryController');
 const requireAuth = require('../middlewares/authMiddleware');
 const { requireAdmin } = require('../middlewares/roleMiddleware');
 
-router.post('/restock', requireAuth, requireAdmin, inventoryController.restockInventory);
+router.post('/restock', requireAuth, requireAdmin, inventoryController.restock);
 
 module.exports = router;
