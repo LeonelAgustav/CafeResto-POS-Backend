@@ -26,8 +26,8 @@ const requireAuth = async (req, res, next) => {
     req.user = user;
     
     // Cek Role (Optional, nanti bisa dikembangkan untuk membedakan Kasir vs Owner)
-    // const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', user.id).single();
-    // req.role = roleData?.role;
+    const { data: roleData } = await supabase.from('user_roles').select('role').eq('user_id', user.id).single();
+    req.role = roleData?.role;
 
     next(); // Lanjut ke Controller
 
